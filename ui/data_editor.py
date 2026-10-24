@@ -5,42 +5,75 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 class MSTDataEditor(tk.Toplevel):
-    """Access / Excel mantığında hücre içi doğrudan (In-Place) canlı düzenleme ve otomatik kaydetme penceresi."""
-
     def __init__(self, parent, db_engine, table_name, on_change_cb=None):
         super().__init__(parent)
         self.db = db_engine
         self.table_name = table_name
         self.on_change_cb = on_change_cb
 
-        self.title(f"📊 MST Veri Editörü (Datasheet) - [{table_name}]")
-        self.geometry("900x560")
+        self.title(f"📊 MST Veri Editörü (Datasheet) - [{self.table_name}]")
+        self.geometry("850x520")
+
+        self.columns = []
+        self.primary_key = "id"
 
         self.setup_ui()
+        self.setup_styles()
         self.load_data()
 
+    def setup_styles(self):
+        """Excel ve Access tarzı dikey-yatay hücre çizgileri ve satır stilleri."""
+        style = ttk.Style(self)
+        
+        # Treeview genel görünüm ve hücre çizgileri
+        style.configure(
+            "Datasheet.Treeview",
+            font=("Segoe UI", 9),
+            rowheight=26,
+            gridlines=True,
+            background="#ffffff",
+            fieldbackground="#ffffff"
+        )
+        style.configure(
+            "Datasheet.Treeview.Heading",
+            font=("Segoe UI", 9, "bold"),
+            background="#e1e6ed",
+            foreground="#212529",
+            relief="raised"
+        )
+        style.map("Datasheet.Treeview", background=[("selected", "#0078d4")], foreground=[("selected", "#ffffff")])
+
     def setup_ui(self):
-        # Üst Araç Çubuğu
         toolbar = ttk.Frame(self, padding=5)
         toolbar.pack(side=tk.TOP, fill=tk.X)
 
-        ttk.Button(toolbar, text="➕ Yeni Satır Ekle", command=self.add_empty_row).pack(side=tk.LEFT, padx=3)
+        ttk.Button(toolbar, text="➕ Yeni Satır Ekle", command=self.add_row).pack(side=tk.LEFT, padx=3)
         ttk.Button(toolbar, text="🗑️ Seçili Satırı Sil", command=self.delete_selected_row).pack(side=tk.LEFT, padx=3)
         ttk.Button(toolbar, text="🔄 Yenile", command=self.load_data).pack(side=tk.LEFT, padx=3)
+
+        ttk.Label(
+            toolbar, 
+            text="💡 İpucu: Hücreye çift tıklayarak veriyi Excel gibi doğrudan değiştirebilirsiniz.", 
+            font=("Helvetica", 8, "italic"),
+            foreground="#555555"
+        ).pack(side=tk.RIGHT, padx=10)
+
+        table_frame = ttk.Frame(self, padding=5)
+        table_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Excel tarzı hem dikey hem yatay grid çizgilerini açmak için Treeview yapısı
+        self.tree = ttk.Treeview(table_frame, style="Datasheet.Treeview", show="headings", selectmode="browse")
         
-        lbl_hint = ttk.Label(toolbar, text="💡 İpucu: Hücreye çift tıklayarak veriyi doğrudan değiştirebilirsiniz.", font=("Helvetica", 9, "italic"))
-        lbl_hint.pack(side=tk.RIGHT, padx=10)
+        vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        # Tablo Grid Alanı
-        grid_frame = ttk.Frame(self, padding=5)
-        grid_frame.pack(fill=tk.BOTH, expand=True)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
 
-        self.tree = ttk.Treeview(grid_frame, show="headings", selectmode="browse")
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        scrollbar = ttk.Scrollbar(grid_frame, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscroll=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
 
         self.tree.bind("<Double-1>", self.on_double_click_cell)
 
@@ -48,120 +81,88 @@ class MSTDataEditor(tk.Toplevel):
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        try:
-            cols_info = self.db.get_table_columns(self.table_name)
-            self.columns = [ci['name'] for ci in cols_info]
-            
-            self.tree["columns"] = self.columns
-            for col in self.columns:
-                self.tree.heading(col, text=f"🔹 {col.upper()}")
-                self.tree.column(col, width=130, anchor="w")
+        cols_info = self.db.get_table_columns(self.table_name)
+        self.columns = [c["name"] for c in cols_info]
+        
+        for c in cols_info:
+            if c["pk"]:
+                self.primary_key = c["name"]
+                break
 
-            cursor = self.db.execute_query(f"SELECT * FROM {self.db.sanitize(self.table_name)}")
-            for row in cursor.fetchall():
-                self.tree.insert("", tk.END, values=row)
+        self.tree["columns"] = self.columns
+        for col in self.columns:
+            self.tree.heading(col, text=f"❖ {col.upper()}", anchor="center")
+            self.tree.column(col, width=130, anchor="w", stretch=True)
 
-            # En alta varsayılan ekleme satırı koy
-            empty_vals = ["* (Yeni)" if i == 0 else "" for i in range(len(self.columns))]
-            self.tree.insert("", tk.END, values=empty_vals, tags=("new_row",))
-            self.tree.tag_configure("new_row", foreground="#888888")
+        rows = self.db.get_table_data(self.table_name)
+        
+        # Zebra çizgi desenleri (Excel görünümü)
+        self.tree.tag_configure("evenrow", background="#f9fbfd")
+        self.tree.tag_configure("oddrow", background="#ffffff")
 
-        except Exception as e:
-            messagebox.showerror("Veri Yükleme Hatası", str(e))
+        for i, r in enumerate(rows):
+            row_vals = [r[col] for col in self.columns]
+            tag = "evenrow" if i % 2 == 0 else "oddrow"
+            self.tree.insert("", tk.END, iid=str(r[self.primary_key]), values=row_vals, tags=(tag,))
 
     def on_double_click_cell(self, event):
-        item = self.tree.identify_row(event.y)
-        column = self.tree.identify_column(event.x)
-        if not item or not column:
+        region = self.tree.identify_region(event.x, event.y)
+        if region != "cell":
             return
 
-        col_idx = int(column.replace("#", "")) - 1
+        column_id = self.tree.identify_column(event.x)
+        col_idx = int(column_id.replace("#", "")) - 1
         col_name = self.columns[col_idx]
 
-        if col_name.lower() == "id":
-            messagebox.showinfo("Bilgi", "Birincil anahtar (ID) otomatik artan alandır, elle değiştirilemez.")
+        if col_name == self.primary_key:
+            messagebox.showinfo("Bilgi", "Birincil Anahtar (Primary Key / ID) sütunu doğrudan değiştirilemez.")
             return
 
-        # Hücre Geometrisi Bulma
-        bbox = self.tree.bbox(item, column)
-        if not bbox:
+        item_id = self.tree.focus()
+        if not item_id:
             return
 
-        x, y, w, h = bbox
-        row_vals = list(self.tree.item(item)["values"])
-        old_val = row_vals[col_idx] if col_idx < len(row_vals) else ""
-        row_id = row_vals[0] if len(row_vals) > 0 else None
+        x, y, w, h = self.tree.bbox(item_id, column_id)
+        current_val = self.tree.item(item_id, "values")[col_idx]
 
-        # Akıllı İlişkili Tablo Tespiti (Örn: sehir_id veya sehir)
-        lookup_options = None
-        if "sehir" in col_name.lower() or "kategori" in col_name.lower() or "rol" in col_name.lower():
-            for t in self.db.get_tables():
-                if t in col_name.lower() or col_name.lower() in t:
-                    try:
-                        cols = [ci['name'] for ci in self.db.get_table_columns(t) if ci['name'].lower() != 'id']
-                        if cols:
-                            cur = self.db.execute_query(f"SELECT {self.db.sanitize(cols[0])} FROM {self.db.sanitize(t)}")
-                            lookup_options = [str(r[0]) for r in cur.fetchall()]
-                    except Exception:
-                        pass
+        entry = ttk.Entry(self.tree)
+        entry.place(x=x, y=y, width=w, height=h)
+        entry.insert(0, current_val)
+        entry.focus()
 
-        # Satır İçi Düzenleyici (In-Place Widget Overlay)
-        if lookup_options:
-            editor = ttk.Combobox(self.tree, values=lookup_options, state="readonly")
-            editor.set(str(old_val))
-        else:
-            editor = ttk.Entry(self.tree)
-            editor.insert(0, str(old_val) if old_val != "* (Yeni)" else "")
-
-        editor.place(x=x, y=y, width=w, height=h)
-        editor.focus_set()
-
-        def save_inline_value(event=None):
-            new_val = editor.get().strip()
-            editor.destroy()
-
-            if new_val == str(old_val):
-                return
-
-            if str(row_id).startswith("*"):
-                # YENİ SATIR EKLEME (INSERT)
-                if new_val:
-                    sql = f"INSERT INTO {self.db.sanitize(self.table_name)} ({self.db.sanitize(col_name)}) VALUES (?)"
-                    try:
-                        self.db.execute_query(sql, (new_val,))
-                        self.load_data()
-                        if self.on_change_cb:
-                            self.on_change_cb()
-                    except Exception as e:
-                        messagebox.showerror("Hata", str(e))
-            else:
-                # VAR OLAN SATIRI GÜNCELLEME (UPDATE)
-                sql = f"UPDATE {self.db.sanitize(self.table_name)} SET {self.db.sanitize(col_name)} = ? WHERE id = ?"
+        def save_edit(event=None):
+            new_val = entry.get()
+            entry.destroy()
+            if new_val != str(current_val):
+                sql = f"UPDATE {self.db.sanitize(self.table_name)} SET {self.db.sanitize(col_name)} = ? WHERE {self.db.sanitize(self.primary_key)} = ?"
                 try:
-                    self.db.execute_query(sql, (new_val, row_id))
+                    self.db.execute_query(sql, (new_val, item_id))
                     self.load_data()
                     if self.on_change_cb:
                         self.on_change_cb()
                 except Exception as e:
-                    messagebox.showerror("Hata", str(e))
+                    messagebox.showerror("Hata", f"Güncelleme yapılamadı:\n{str(e)}")
 
-        editor.bind("<Return>", save_inline_value)
-        editor.bind("<FocusOut>", save_inline_value)
+        entry.bind("<Return>", save_edit)
+        entry.bind("<FocusOut>", lambda e: entry.destroy())
 
-    def add_empty_row(self):
-        cols_info = [ci for ci in self.db.get_table_columns(self.table_name) if ci['name'].lower() != 'id']
-        if not cols_info:
+    def add_row(self):
+        non_pk_cols = [c for c in self.columns if c != self.primary_key]
+        if not non_pk_cols:
             return
 
-        first_col = cols_info[0]['name']
+        cols_str = ", ".join([self.db.sanitize(c) for c in non_pk_cols])
+        placeholders = ", ".join(["?" for _ in non_pk_cols])
+        default_vals = ["(Yeni)" if i == 0 else "" for i in range(len(non_pk_cols))]
+
+        sql = f"INSERT INTO {self.db.sanitize(self.table_name)} ({cols_str}) VALUES ({placeholders})"
         try:
-            sql = f"INSERT INTO {self.db.sanitize(self.table_name)} ({self.db.sanitize(first_col)}) VALUES (?)"
-            self.db.execute_query(sql, ("Yeni Kayıt",))
+            self.db.execute_query(sql, tuple(default_vals))
             self.load_data()
             if self.on_change_cb:
                 self.on_change_cb()
         except Exception as e:
-            messagebox.showerror("Hata", str(e))
+            messagebox.showerror("Hata", f"Yeni satır eklenemedi:\n{str(e)}")
 
     def delete_selected_row(self):
         sel = self.tree.selection()
@@ -169,18 +170,13 @@ class MSTDataEditor(tk.Toplevel):
             messagebox.showwarning("Uyarı", "Lütfen silmek istediğiniz satırı seçin!")
             return
 
-        row_vals = self.tree.item(sel[0])["values"]
-        row_id = row_vals[0]
-
-        if str(row_id).startswith("*"):
-            return
-
-        if messagebox.askyesno("Onay", f"ID = {row_id} olan kayıt silinecektir. Devam edilsin mi?"):
+        item_id = sel[0]
+        if messagebox.askyesno("Onay", "Seçili satır kalıcı olarak silinecek. Emin misiniz?"):
+            sql = f"DELETE FROM {self.db.sanitize(self.table_name)} WHERE {self.db.sanitize(self.primary_key)} = ?"
             try:
-                sql = f"DELETE FROM {self.db.sanitize(self.table_name)} WHERE id = ?"
-                self.db.execute_query(sql, (row_id,))
+                self.db.execute_query(sql, (item_id,))
                 self.load_data()
                 if self.on_change_cb:
                     self.on_change_cb()
             except Exception as e:
-                messagebox.showerror("Hata", str(e))
+                messagebox.showerror("Hata", f"Satır silinemedi:\n{str(e)}")
