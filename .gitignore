@@ -1,0 +1,21 @@
+# Python Geçici Dosyaları
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# MST Studio Derleme ve Çıktı Klasörleri
+dist/
+build/
+*.spec
+
+# Test Geçici Veritabanları ve Projeleri
+*.db
+!assets/
+projects/
+
+# Sistem ve IDE Dosyaları
+.DS_Store
+.idea/
+.vscode/
+*.swp

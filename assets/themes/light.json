@@ -1,0 +1,10 @@
+{
+  "theme_name": "light",
+  "bg_main": "#f0f0f0",
+  "bg_panel": "#ffffff",
+  "bg_canvas": "#ffffff",
+  "fg_text": "#222222",
+  "border_color": "#cccccc",
+  "accent_color": "#007acc",
+  "select_bg": "#e6f2ff"
+}

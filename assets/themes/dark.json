@@ -1,0 +1,10 @@
+{
+  "theme_name": "dark",
+  "bg_main": "#1e1e1e",
+  "bg_panel": "#252526",
+  "bg_canvas": "#2d2d2d",
+  "fg_text": "#cccccc",
+  "border_color": "#3c3c3c",
+  "accent_color": "#007acc",
+  "select_bg": "#094771"
+}

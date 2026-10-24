@@ -1,0 +1,22 @@
+{
+  "app_title": "MST Studio - Access Katili Görsel Uygulama Geliştirme Platformu",
+  "menu_file": "Dosya",
+  "menu_new_page": "📄 Yeni Form / Sayfa Ekle",
+  "menu_db_designer": "🗄️ Veritabanı & İlişki Yöneticisi",
+  "menu_run": "▶ Uygulamayı Çalıştır (F5)",
+  "panel_pages": "Formlar & Sayfa Yetkileri",
+  "panel_tools": "Access Çizim Araç Paleti",
+  "panel_canvas": "Form Tasarım Tuvali (Çiz veya Taşı)",
+  "panel_properties": "Access Özellikler Sayfası",
+  "tool_select": "↖ Seç & Taş",
+  "tool_label": "🔤 Etiket (Label)",
+  "tool_input": "✏️ Metin Kutusu (Input)",
+  "tool_button": "🔘 Buton (Action)",
+  "tool_grid": "📊 Veri Izgarası (Grid)",
+  "btn_apply": "💾 Uygula",
+  "btn_delete": "🗑️ Elemanı Sil",
+  "lbl_page_name": "Sayfa Adı",
+  "lbl_role": "Erişim Yetkisi",
+  "msg_success": "Başarılı",
+  "msg_error": "Hata"
+}

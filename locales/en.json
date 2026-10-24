@@ -1,0 +1,22 @@
+{
+  "app_title": "MST Studio - Visual Application Builder & Access Killer",
+  "menu_file": "File",
+  "menu_new_page": "📄 New Form / Page",
+  "menu_db_designer": "🗄️ Database & Relationship Manager",
+  "menu_run": "▶ Run Application (F5)",
+  "panel_pages": "Forms & Page Permissions",
+  "panel_tools": "Access Drawing Palette",
+  "panel_canvas": "Form Design Canvas (Draw or Move)",
+  "panel_properties": "Access Property Sheet",
+  "tool_select": "↖ Select & Move",
+  "tool_label": "🔤 Label",
+  "tool_input": "✏️ Text Box (Input)",
+  "tool_button": "🔘 Button (Action)",
+  "tool_grid": "📊 Data Grid",
+  "btn_apply": "💾 Apply",
+  "btn_delete": "🗑️ Delete Element",
+  "lbl_page_name": "Page Name",
+  "lbl_role": "Access Permission",
+  "msg_success": "Success",
+  "msg_error": "Error"
+}
