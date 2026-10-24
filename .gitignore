@@ -1,21 +1,30 @@
-# Python Geçici Dosyaları
+# --- Python & Derleme Kalıntıları ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 
-# MST Studio Derleme ve Çıktı Klasörleri
+# --- Derleyici ve Paket Çıktıları (dist/build) ---
 dist/
 build/
 *.spec
 
-# Test Geçici Veritabanları ve Projeleri
+# --- Veritabanı ve Yerel Kullanıcı Verileri (Güvenlik Önlemi) ---
 *.db
+*.sqlite
+*.sqlite3
 !assets/
-projects/
+projects/*
+!projects/.gitkeep
 
-# Sistem ve IDE Dosyaları
+# --- IDE, OS ve Sistem Kalıntıları ---
 .DS_Store
 .idea/
 .vscode/
 *.swp
+*.log
+
+# --- Kimlik Bilgileri ve Betik Geçici Dosyaları ---
+.env
+.git-credentials
+version.txt

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=GitHub Otomatik Gönder
+Comment=MST Studio GitHub Sync
+Exec=python3 /home/mustafa/Projects/mst_proje/auto_push_gui.py
+Path=/home/mustafa/Projects/mst_proje
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+Categories=Development;
