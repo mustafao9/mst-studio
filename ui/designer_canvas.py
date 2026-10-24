@@ -43,16 +43,14 @@ class DesignerCanvas(ttk.Frame):
         self.context_menu.add_separator()
         
         align_menu = Menu(self.context_menu, tearoff=0)
-        align_menu.add_command(label="⇤ Sola Hizala (Etiket & Kutu Aralığını Koru)", command=lambda: self.align_selected("left"))
+        align_menu.add_command(label="⇤ Sola Hizala", command=lambda: self.align_selected("left"))
         align_menu.add_command(label="⇥ Sağa Hizala", command=lambda: self.align_selected("right"))
         align_menu.add_command(label="⇡ Üste Hizala", command=lambda: self.align_selected("top"))
         align_menu.add_command(label="⇣ Alta Hizala", command=lambda: self.align_selected("bottom"))
         align_menu.add_separator()
-        align_menu.add_command(label="↔ Genişlikleri Eşitle (En Genişe Göre)", command=lambda: self.size_selected("width_max"))
-        align_menu.add_command(label="↔ Genişlikleri Eşitle (En Dara Göre)", command=lambda: self.size_selected("width_min"))
-        align_menu.add_separator()
+        align_menu.add_command(label="↔ Genişlikleri Eşitle", command=lambda: self.size_selected("width_max"))
         align_menu.add_command(label="↕ Dikeyde Eşit Dağıt", command=self.distribute_vertically)
-        self.context_menu.add_cascade(label="📐 Hizala, Eşitle & Dağıt (Access Standardı)", menu=align_menu)
+        self.context_menu.add_cascade(label="📐 Hizala, Eşitle & Dağıt", menu=align_menu)
 
         layer_menu = Menu(self.context_menu, tearoff=0)
         layer_menu.add_command(label="⬆️ En Öne Getir", command=self.bring_to_front)
@@ -66,32 +64,25 @@ class DesignerCanvas(ttk.Frame):
         self.context_menu.add_command(label="🗑️ Seçilenleri Sil", command=self.delete_selected)
 
     def align_selected(self, mode):
-        """Etiket ve Giriş Kutusu aralığını (Gap) koruyarak akıllı hizalama yapar."""
-        if len(self.selected_components) < 2:
-            return
-
+        if len(self.selected_components) < 2: return
         movable = [c for c in self.selected_components if not c.get('locked', False)]
         if not movable: return
 
         if mode == "left":
-            # Etiketler kendi sol çizgisine, bağlı giriş kutuları kendi sol çizgisine kilitlenir
             labels = [c for c in movable if c['type'] == "Etiket"]
             inputs = [c for c in movable if c['type'] != "Etiket"]
 
             if labels:
                 min_label_x = min(c['x'] for c in labels)
-                for c in labels:
-                    c['x'] = min_label_x
+                for c in labels: c['x'] = min_label_x
 
             if inputs:
                 min_input_x = min(c['x'] for c in inputs)
-                for c in inputs:
-                    c['x'] = min_input_x
+                for c in inputs: c['x'] = min_input_x
 
         elif mode == "top":
             min_y = min(c['y'] for c in movable)
-            for c in movable:
-                c['y'] = min_y
+            for c in movable: c['y'] = min_y
 
         self.render_all()
 
@@ -103,9 +94,6 @@ class DesignerCanvas(ttk.Frame):
         if mode == "width_max":
             max_w = max(c['w'] for c in movable)
             for c in movable: c['w'] = max_w
-        elif mode == "width_min":
-            min_w = min(c['w'] for c in movable)
-            for c in movable: c['w'] = min_w
 
         self.render_all()
 
@@ -221,13 +209,16 @@ class DesignerCanvas(ttk.Frame):
                 self.resizing_handle = handle
                 return
 
+        # Tıklanan Araç Tipi Eşleme (subform ve combo tam eklendi)
         if self.current_tool != "select":
             comp_type_map = {
                 "label": "Etiket",
                 "input": "Metin Kutusu",
+                "combo": "Açılır Liste",
                 "checkbox": "Onay Kutusu",
                 "button": "Buton",
-                "grid": "Veri Tablosu"
+                "grid": "Veri Tablosu",
+                "subform": "Alt Form (Master-Detail)"
             }
             c_type = comp_type_map.get(self.current_tool, "Etiket")
             new_id = max([c["id"] for c in self.components], default=0) + 1
@@ -236,16 +227,19 @@ class DesignerCanvas(ttk.Frame):
                 "id": new_id,
                 "type": c_type,
                 "x": x, "y": y,
-                "w": 180 if c_type == "Veri Tablosu" else 130,
-                "h": 120 if c_type == "Veri Tablosu" else 30,
+                "w": 340 if c_type in ["Veri Tablosu", "Alt Form (Master-Detail)"] else 130,
+                "h": 160 if c_type in ["Veri Tablosu", "Alt Form (Master-Detail)"] else 30,
                 "text": f"{c_type}_{new_id}",
                 "table": "", "field": "",
+                "master_field": "id",
+                "detail_field": "",
                 "locked": False,
                 "pair_id": None
             }
             self.components.append(new_comp)
             self.selected_components = [new_comp]
             self.selected_component = new_comp
+            # Eleman çizildikten sonra otomatik olarak "Seç & Taş" moduna geri dön
             self.current_tool = "select"
             self.is_box_selecting = False
             self.render_all()
@@ -264,7 +258,6 @@ class DesignerCanvas(ttk.Frame):
                 else:
                     self.selected_components.append(comp)
             else:
-                # Eğer tek tıklandıysa ve ilişkili eşi (pair_id) varsa eşini de seç
                 pair = [c for c in self.components if c.get('id') == comp.get('pair_id')] if comp.get('pair_id') else []
                 if comp not in self.selected_components:
                     self.selected_components = [comp] + pair
@@ -417,7 +410,9 @@ class DesignerCanvas(ttk.Frame):
                 self.canvas.create_rectangle(x + w - h_size, y + h - h_size, x + w + h_size, y + h + h_size, fill="#007acc", outline="#ffffff")
 
             disp_text = c.get('text', '')
-            if c.get('table') and c.get('field'):
+            if c['type'] == "Alt Form (Master-Detail)":
+                disp_text = f"🔗 Alt Form: [{c.get('table', 'Tablo Seçilmedi')}]"
+            elif c.get('table') and c.get('field'):
                 disp_text = f"[{c['field']}]"
 
             lock_icon = "🔒 " if is_locked else ""

@@ -19,6 +19,8 @@ from ui.packager_dialog import MSTPackagerDialog
 from preview.live_simulator import LiveSimulator
 
 class MSTStudioIDE:
+    """MS Access Mimarisi & MST Studio Özgün Şerit Menülü IDE"""
+
     def __init__(self, root):
         self.root = root
         self.root.app = self
@@ -60,31 +62,65 @@ class MSTStudioIDE:
         self.theme_engine.apply_theme_to_root(self.root)
         self.load_page(self.active_page)
 
-        # Çift tıklama ile dışarıdan .mst dosyası gönderilmişse otomatik aç
         if len(sys.argv) > 1:
             passed_file = sys.argv[1]
             if os.path.exists(passed_file) and passed_file.endswith(".mst"):
                 self.load_mst_file_from_path(passed_file)
 
     def setup_ui(self):
-        toolbar = ttk.Frame(self.root, padding=5)
-        toolbar.pack(side=tk.TOP, fill=tk.X)
+        # 1. MS Access Tarzı Sekmeli Şerit Menü (Ribbon Toolbar)
+        ribbon_frame = ttk.Frame(self.root, padding=2)
+        ribbon_frame.pack(side=tk.TOP, fill=tk.X)
 
-        ttk.Button(toolbar, text="💾 Projeyi Kaydet (.mst)", command=self.save_project_file).pack(side=tk.LEFT, padx=3)
-        ttk.Button(toolbar, text="📂 Projeyi Aç (.mst)", command=self.open_project_file).pack(side=tk.LEFT, padx=3)
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        self.ribbon_notebook = ttk.Notebook(ribbon_frame)
+        self.ribbon_notebook.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        ttk.Button(toolbar, text="📄 Yeni Form", command=self.add_page_dialog).pack(side=tk.LEFT, padx=3)
-        ttk.Button(toolbar, text="📦 Bağımsız Uygulama Paketle (Exe/Bundle)", command=self.open_packager_dialog).pack(side=tk.LEFT, padx=6)
+        # Hızlı Çalıştır Butonu (Sağ Üst Sabit - padding parametresi padx/pady olarak düzeltildi)
+        btn_run = tk.Button(ribbon_frame, text="▶ Uygulamayı Çalıştır (F5)", bg="#2eb85c", fg="white", font=("Helvetica", 10, "bold"), command=self.run_preview, padx=10, pady=4)
+        btn_run.pack(side=tk.RIGHT, padx=10, pady=2)
 
-        btn_run = tk.Button(toolbar, text="▶ Uygulamayı Çalıştır (F5)", bg="#2eb85c", fg="white", font=("Helvetica", 10, "bold"), command=self.run_preview)
-        btn_run.pack(side=tk.LEFT, padx=15)
+        # Ribbon Sekmeleri
+        tab_project = ttk.Frame(self.ribbon_notebook, padding=5)
+        tab_tools = ttk.Frame(self.ribbon_notebook, padding=5)
+        tab_align = ttk.Frame(self.ribbon_notebook, padding=5)
 
-        ttk.Button(toolbar, text="🌙 / ☀️ Tema Değiştir", command=self.toggle_theme).pack(side=tk.RIGHT, padx=5)
+        self.ribbon_notebook.add(tab_project, text="📁 Dosya & Proje")
+        self.ribbon_notebook.add(tab_tools, text="🛠️ Form Denetimleri")
+        self.ribbon_notebook.add(tab_align, text="📐 Hizala & Biçimlendir")
 
+        # TAB 1: Dosya & Proje
+        ttk.Button(tab_project, text="💾 Projeyi Kaydet (.mst)", command=self.save_project_file).pack(side=tk.LEFT, padx=3)
+        ttk.Button(tab_project, text="📂 Projeyi Aç (.mst)", command=self.open_project_file).pack(side=tk.LEFT, padx=3)
+        ttk.Separator(tab_project, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        ttk.Button(tab_project, text="📄 Yeni Form Ekle", command=self.add_page_dialog).pack(side=tk.LEFT, padx=3)
+        ttk.Button(tab_project, text="📦 Bağımsız Paketle (Exe/Bundle)", command=self.open_packager_dialog).pack(side=tk.LEFT, padx=3)
+        ttk.Separator(tab_project, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        ttk.Button(tab_project, text="🌙 / ☀️ Tema Değiştir", command=self.toggle_theme).pack(side=tk.LEFT, padx=3)
+
+        # TAB 2: Form Denetim Araçları
+        ttk.Button(tab_tools, text="🔤 Etiket", command=lambda: self.canvas.set_tool("label")).pack(side=tk.LEFT, padx=3)
+        ttk.Button(tab_tools, text="✏️ Metin Kutusu", command=lambda: self.canvas.set_tool("input")).pack(side=tk.LEFT, padx=3)
+        ttk.Button(tab_tools, text="🔽 Açılır Liste", command=lambda: self.canvas.set_tool("combo")).pack(side=tk.LEFT, padx=3)
+        ttk.Button(tab_tools, text="☑️ Onay Kutusu", command=lambda: self.canvas.set_tool("checkbox")).pack(side=tk.LEFT, padx=3)
+        ttk.Button(tab_tools, text="🔘 Buton", command=lambda: self.canvas.set_tool("button")).pack(side=tk.LEFT, padx=3)
+        ttk.Separator(tab_tools, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        ttk.Button(tab_tools, text="📊 Veri Tablosu", command=lambda: self.canvas.set_tool("grid")).pack(side=tk.LEFT, padx=3)
+        ttk.Button(tab_tools, text="🔗 Alt Form (Sub-Form)", command=lambda: self.canvas.set_tool("subform")).pack(side=tk.LEFT, padx=3)
+
+        # TAB 3: Hizalama & Biçimlendirme
+        ttk.Button(tab_align, text="⇤ Sola Hizala", command=lambda: self.canvas.align_selected("left")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(tab_align, text="⇥ Sağa Hizala", command=lambda: self.canvas.align_selected("right")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(tab_align, text="⇡ Üste Hizala", command=lambda: self.canvas.align_selected("top")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(tab_align, text="⇣ Alta Hizala", command=lambda: self.canvas.align_selected("bottom")).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(tab_align, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        ttk.Button(tab_align, text="↔ Genişlik Eşitle", command=lambda: self.canvas.size_selected("width_max")).pack(side=tk.LEFT, padx=2)
+        ttk.Button(tab_align, text="↕ Dikey Eşit Dağıt", command=lambda: self.canvas.distribute_vertically()).pack(side=tk.LEFT, padx=2)
+
+        # 2. Ana Çalışma Panelleri
         main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
+        # Sol Panel (Formlar ve DB Ağacı)
         left_paned = ttk.PanedWindow(main_paned, orient=tk.VERTICAL)
         main_paned.add(left_paned, weight=2)
 
@@ -98,31 +134,22 @@ class MSTStudioIDE:
         self.refresh_pages_list()
 
         self.page_context_menu = tk.Menu(self.root, tearoff=0)
-        self.page_context_menu.add_command(label="✏️ Form İsmini Değiştir (Rename)", command=self.rename_selected_page)
-        self.page_context_menu.add_command(label="📋 Form Kopyasını Oluştur (Duplicate)", command=self.duplicate_selected_page)
+        self.page_context_menu.add_command(label="✏️ Form İsmini Değiştir", command=self.rename_selected_page)
+        self.page_context_menu.add_command(label="📋 Form Kopyasını Oluştur", command=self.duplicate_selected_page)
         self.page_context_menu.add_separator()
         self.page_context_menu.add_command(label="🗑️ Formu Sil", command=self.delete_selected_page)
 
         self.db_tree_view = DBTreeView(left_paned, self.db_engine, i18n, ide_instance=self)
         left_paned.add(self.db_tree_view, weight=2)
 
+        # Orta Panel (Tasarım Tuvali)
         center_frame = ttk.Frame(main_paned, padding=5)
         main_paned.add(center_frame, weight=7)
-
-        palette = ttk.LabelFrame(center_frame, text=" MST Form Denetim Araçları ", padding=5)
-        palette.pack(side=tk.TOP, fill=tk.X, pady=2)
-
-        ttk.Button(palette, text="↖ Seç & Taş", command=lambda: self.canvas.set_tool("select")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(palette, text="🔤 Etiket", command=lambda: self.canvas.set_tool("label")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(palette, text="✏️ Metin Kutusu", command=lambda: self.canvas.set_tool("input")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(palette, text="🔽 Açılır Liste", command=lambda: self.canvas.set_tool("select")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(palette, text="☑️ Onay Kutusu", command=lambda: self.canvas.set_tool("checkbox")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(palette, text="🔘 Buton", command=lambda: self.canvas.set_tool("button")).pack(side=tk.LEFT, padx=2)
-        ttk.Button(palette, text="📊 Veri Tablosu", command=lambda: self.canvas.set_tool("grid")).pack(side=tk.LEFT, padx=2)
 
         self.canvas = DesignerCanvas(center_frame, i18n, self.on_component_selected)
         self.canvas.pack(fill=tk.BOTH, expand=True, pady=2)
 
+        # Sağ Panel (Özellikler Paneli - Property Sheet)
         self.property_sheet = MSTPropertySheet(main_paned, self.db_engine, i18n, self.on_properties_updated)
         main_paned.add(self.property_sheet, weight=3)
 

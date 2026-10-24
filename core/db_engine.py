@@ -3,88 +3,97 @@
 
 import sqlite3
 import os
-import re
-from core.security_engine import SecurityEngine
 
 class DatabaseEngine:
+    """MST Studio SQLite Veritabanı Yönetim Motoru."""
+
     def __init__(self, db_path):
         self.db_path = db_path
-        self.init_system_tables()
+        self._ensure_db_dir()
+
+    def _ensure_db_dir(self):
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
 
     def get_connection(self):
         conn = sqlite3.connect(self.db_path)
-        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
         return conn
 
-    def sanitize(self, text):
-        tr_map = {'ç': 'c', 'Ç': 'c', 'ğ': 'g', 'Ğ': 'g', 'ı': 'i', 'İ': 'i', 'ö': 'o', 'Ö': 'o', 'ş': 's', 'Ş': 's', 'ü': 'u', 'Ü': 'u'}
-        for k, v in tr_map.items():
-            text = text.replace(k, v)
-        text = text.strip().replace(" ", "_").replace("-", "_")
-        return re.sub(r'[^a-zA-Z0-9_]', '', text)
+    def execute_query(self, sql, params=()):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        conn.commit()
+        return cursor
 
-    def init_system_tables(self):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS kullanicilar (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ad_soyad TEXT,
-                    kullanici_adi TEXT UNIQUE,
-                    sifre TEXT,
-                    rol TEXT
-                )
-            ''')
-            
-            cursor.execute("SELECT COUNT(*) FROM kullanicilar")
-            if cursor.fetchone()[0] == 0:
-                hashed_pw = SecurityEngine.hash_password("123")
-                cursor.execute(
-                    "INSERT INTO kullanicilar (ad_soyad, kullanici_adi, sifre, rol) VALUES (?, ?, ?, ?)",
-                    ("Sistem Yöneticisi", "admin", hashed_pw, "Admin")
-                )
-            conn.commit()
+    def sanitize(self, name):
+        """SQL Enjeksiyonuna karşı tablo ve sütun isimlerini temizler."""
+        if not name:
+            return ""
+        return "".join([c for c in str(name) if c.isalnum() or c == '_'])
 
     def get_tables(self):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
-            return [t[0] for t in cursor.fetchall()]
+        """Veritabanındaki tablo isimlerini liste olarak döndürür."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+        tables = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        return tables
 
     def get_table_columns(self, table_name):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"PRAGMA table_info({table_name});")
-            return [{"id": col[0], "name": col[1], "type": col[2], "notnull": col[3], "pk": col[5]} for col in cursor.fetchall()]
+        """Belirtilen tablonun sütun bilgilerini döndürür."""
+        clean_name = self.sanitize(table_name)
+        if not clean_name:
+            return []
 
-    def create_table(self, table_name, columns_def, foreign_keys=None):
-        t_name = self.sanitize(table_name)
-        cols_sql = ["id INTEGER PRIMARY KEY AUTOINCREMENT"]
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(f"PRAGMA table_info({clean_name});")
+        rows = cursor.fetchall()
+        conn.close()
 
-        for col in columns_def:
-            c_name = self.sanitize(col['name'])
-            c_type = col.get('type', 'TEXT')
-            if c_name.lower() != 'id':
-                cols_sql.append(f"{c_name} {c_type}")
+        cols = []
+        for r in rows:
+            cols.append({
+                "cid": r[0],
+                "name": r[1],
+                "type": r[2],
+                "notnull": r[3],
+                "dflt_value": r[4],
+                "pk": r[5]
+            })
+        return cols
 
-        if foreign_keys:
-            for fk in foreign_keys:
-                cols_sql.append(f"FOREIGN KEY ({self.sanitize(fk['column'])}) REFERENCES {self.sanitize(fk['ref_table'])}({self.sanitize(fk['ref_column'])}) ON DELETE CASCADE")
+    def get_table_data(self, table_name):
+        """Belirtilen tablodaki tüm satırları sözlük listesi olarak döndürür."""
+        clean_name = self.sanitize(table_name)
+        if not clean_name:
+            return []
 
-        sql = f"CREATE TABLE IF NOT EXISTS {t_name} ({', '.join(cols_sql)});"
-        with self.get_connection() as conn:
-            conn.cursor().execute(sql)
-            conn.commit()
-        return t_name
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT * FROM {clean_name};")
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(r) for r in rows]
+
+    def create_table(self, table_name, columns):
+        clean_name = self.sanitize(table_name)
+        col_defs = ["id INTEGER PRIMARY KEY AUTOINCREMENT"]
+        for col in columns:
+            c_name = self.sanitize(col.get("name"))
+            c_type = col.get("type", "TEXT")
+            if c_name and c_name != "id":
+                col_defs.append(f"{c_name} {c_type}")
+
+        sql = f"CREATE TABLE IF NOT EXISTS {clean_name} ({', '.join(col_defs)});"
+        self.execute_query(sql)
 
     def drop_table(self, table_name):
-        with self.get_connection() as conn:
-            conn.cursor().execute(f"DROP TABLE IF EXISTS {self.sanitize(table_name)};")
-            conn.commit()
-
-    def execute_query(self, sql, params=()):
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(sql, params)
-            conn.commit()
-            return cursor
+        clean_name = self.sanitize(table_name)
+        if clean_name:
+            self.execute_query(f"DROP TABLE IF EXISTS {clean_name};")

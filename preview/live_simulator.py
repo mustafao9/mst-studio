@@ -1,285 +1,345 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import re
+import os
+import sqlite3
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, simpledialog
-from core.action_engine import MSTActionEngine
+from tkinter import ttk, messagebox
 
 class LiveSimulator(tk.Toplevel):
-    def __init__(self, parent, db_engine, i18n_engine, pages_dict, page_components_dict, active_page="Giris_Sayfasi"):
+    """MS Access Mimarisi 2. Faz: Gezinti Çubuğu (Navigation Bar), Tam Otomatik Veri Bağlama & Makro Motoru"""
+
+    def __init__(self, parent, db_engine, i18n_engine, pages, page_components, active_page="Giris_Sayfasi"):
         super().__init__(parent)
         self.db = db_engine
         self.i18n = i18n_engine
-        self.pages = pages_dict
-        self.components = page_components_dict
+        self.pages = pages
+        self.page_components = page_components
         self.active_page = active_page
 
-        self.title("MST Studio - Live Application Preview")
-        self.geometry("1020x700")
+        self.title(f"▶ MST Studio Live Runtime - [{active_page}]")
+        self.geometry("1140x780")
 
-        self.session = {"user": None, "role": None}
-        self.action_engine = MSTActionEngine(self.db, self)
-        self.selected_row_id = None
+        self.form_inputs = {}  # {field_name: (widget_type, widget_instance)}
+        self.active_records = []
+        self.current_record_index = -1
+        self.active_table_name = ""
+        self.main_grid_tree = None
 
         self.setup_ui()
         self.render_page(self.active_page)
 
     def setup_ui(self):
-        self.sidebar = ttk.Frame(self, width=180, padding=10, relief="groove")
+        # Sol Menü
+        self.sidebar = ttk.Frame(self, width=200, padding=10, relief="groove")
         self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
 
-        self.viewport = tk.Canvas(self, bg="#f9f9f9", highlightthickness=0)
-        self.viewport.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        # Ana Çalışma Alanı
+        self.main_container = ttk.Frame(self)
+        self.main_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        self.viewport = tk.Canvas(self.main_container, bg="#ffffff", highlightthickness=0)
+        self.viewport.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # MS Access Tarzı Gezinti Çubuğu (Navigation Bar)
+        self.nav_bar = ttk.Frame(self.main_container, padding=4, relief="raised")
+        self.nav_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        ttk.Button(self.nav_bar, text="|◄", width=4, command=self.nav_first).pack(side=tk.LEFT, padx=1)
+        ttk.Button(self.nav_bar, text="◄", width=4, command=self.nav_prev).pack(side=tk.LEFT, padx=1)
+        
+        ttk.Label(self.nav_bar, text=" Kayıt: ").pack(side=tk.LEFT, padx=(5, 0))
+        self.lbl_record_count = ttk.Label(self.nav_bar, text="0 / 0", font=("Helvetica", 9, "bold"))
+        self.lbl_record_count.pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(self.nav_bar, text="►", width=4, command=self.nav_next).pack(side=tk.LEFT, padx=1)
+        ttk.Button(self.nav_bar, text="►|", width=4, command=self.nav_last).pack(side=tk.LEFT, padx=1)
+        ttk.Button(self.nav_bar, text="➕ Yeni Kayıt", command=self.nav_new).pack(side=tk.LEFT, padx=10)
 
     def update_sidebar(self):
         for w in self.sidebar.winfo_children():
             w.destroy()
 
-        ttk.Label(self.sidebar, text="📌 Sayfa Menüsü", font=("Helvetica", 10, "bold")).pack(anchor=tk.W, pady=5)
-        
-        user_disp = self.session["user"] or "Açılmadı"
-        role_disp = self.session["role"] or "Herkes"
-        
-        ttk.Label(self.sidebar, text=f"Oturum: {user_disp}\nYetki: {role_disp}", font=("Helvetica", 8, "italic")).pack(anchor=tk.W, pady=5)
+        ttk.Label(self.sidebar, text="📌 Form Menüsü", font=("Helvetica", 10, "bold")).pack(anchor=tk.W, pady=5)
         ttk.Separator(self.sidebar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
 
-        for p_name, p_info in self.pages.items():
-            req_role = p_info.get("role", "Herkes")
-            if req_role == "Herkes" or role_disp == "Admin" or role_disp == req_role:
-                ttk.Button(self.sidebar, text=p_name, command=lambda p=p_name: self.render_page(p)).pack(fill=tk.X, pady=2)
-
-    def validate_inputs(self, page_comps, inputs_map):
-        for c in page_comps:
-            if c['type'] in ["Metin Kutusu", "Açılır Liste"]:
-                fld = c.get('field')
-                if not fld or fld not in inputs_map:
-                    continue
-
-                entry_widget = inputs_map[fld][0]
-                val = entry_widget.get().strip() if hasattr(entry_widget, 'get') else ""
-
-                if c.get("is_required", False) and not val:
-                    msg = c.get("validation_msg") or f"'{c.get('text', fld)}' alanı boş bırakılamaz!"
-                    messagebox.showwarning("Doğrulama Uyarısı", msg)
-                    if hasattr(entry_widget, 'focus_set'):
-                        entry_widget.focus_set()
-                    return False
-
-        return True
-
-    def populate_form_from_row(self, tree, inputs_map, tbl_name):
-        sel = tree.selection()
-        if not sel:
-            return
-
-        row_vals = tree.item(sel[0])["values"]
-        cols = tree["columns"]
-
-        if not row_vals or not cols:
-            return
-
-        self.selected_row_id = row_vals[0]
-        col_val_map = dict(zip(cols, row_vals))
-
-        for fld, (widget, t_name) in inputs_map.items():
-            if fld in col_val_map:
-                val = str(col_val_map[fld])
-                if isinstance(widget, ttk.Entry):
-                    widget.delete(0, tk.END)
-                    widget.insert(0, val)
-                elif isinstance(widget, ttk.Combobox):
-                    widget.set(val)
-
-    def clear_form_inputs(self, inputs_map):
-        self.selected_row_id = None
-        for fld, (widget, t_name) in inputs_map.items():
-            if isinstance(widget, ttk.Entry):
-                widget.delete(0, tk.END)
-            elif isinstance(widget, ttk.Combobox):
-                if widget['values']:
-                    widget.current(0)
-
-    def add_quick_lookup_record(self, lookup_tbl, cb_widget):
-        """Açılır kutudan çıkmadan ilişkili tabloya hızlı yeni veri ekler."""
-        cols = [ci['name'] for ci in self.db.get_table_columns(lookup_tbl) if ci['name'].lower() != 'id']
-        if not cols:
-            return
-
-        target_col = cols[0]
-        new_val = simpledialog.askstring("Hızlı Ekle", f"Yeni '{lookup_tbl.upper()}' kaydını girin:", parent=self)
-        if new_val:
-            try:
-                sql = f"INSERT INTO {self.db.sanitize(lookup_tbl)} ({self.db.sanitize(target_col)}) VALUES (?)"
-                self.db.execute_query(sql, (new_val.strip(),))
-                
-                # Açılır kutu verilerini canlı yenile
-                cur = self.db.execute_query(f"SELECT {self.db.sanitize(target_col)} FROM {self.db.sanitize(lookup_tbl)}")
-                updated_options = [str(r[0]) for r in cur.fetchall()]
-                cb_widget['values'] = updated_options
-                cb_widget.set(new_val.strip())
-                messagebox.showinfo("Başarılı", f"'{new_val}' kaydı {lookup_tbl} tablosuna eklendi!")
-            except Exception as e:
-                messagebox.showerror("Hata", str(e))
+        for p_name in self.pages.keys():
+            btn = ttk.Button(self.sidebar, text=f"📋 {p_name}", command=lambda p=p_name: self.render_page(p))
+            btn.pack(fill=tk.X, pady=2)
 
     def render_page(self, page_name):
         self.active_page = page_name
-        self.selected_row_id = None
+        self.form_inputs = {}
+        self.active_records = []
+        self.current_record_index = -1
+        self.active_table_name = ""
+
         self.viewport.delete("all")
         for child in self.viewport.winfo_children():
             child.destroy()
 
         self.update_sidebar()
+        comps = self.page_components.get(page_name, [])
 
-        page_info = self.pages.get(page_name, {})
-        req = page_info.get("role", "Herkes")
-
-        if req != "Herkes" and self.session["role"] != req and self.session["role"] != "Admin":
-            lbl = tk.Label(self.viewport, text="⚠️ Yetkisiz Erişim!\nBu sayfayı görüntüleme izniniz yok.", font=("Helvetica", 14, "bold"), fg="red", bg="#f9f9f9")
-            lbl.place(x=150, y=150)
-            return
-
-        comps = self.components.get(page_name, [])
-        inputs = {}
-        tree_widgets = {}
+        self.main_grid_tree = None
+        subform_comps = []
 
         for c in comps:
             x, y, w, h = c['x'], c['y'], c['w'], c['h']
+            tbl = c.get('table', '')
+            fld = c.get('field', '')
+
+            if tbl and not self.active_table_name and c['type'] != "Alt Form (Master-Detail)":
+                self.active_table_name = tbl
 
             if c['type'] == "Etiket":
-                lbl = tk.Label(self.viewport, text=c['text'], font=("Helvetica", 9), bg="#f9f9f9", anchor="w")
+                lbl = tk.Label(self.viewport, text=c['text'], font=("Helvetica", 9), bg="#ffffff", anchor="w")
                 lbl.place(x=x, y=y, width=w, height=h)
 
             elif c['type'] == "Metin Kutusu":
                 ent = ttk.Entry(self.viewport)
                 ent.place(x=x, y=y, width=w, height=h)
-                inputs[c['field']] = (ent, c['table'])
+                if fld:
+                    self.form_inputs[fld] = ("entry", ent)
 
             elif c['type'] == "Açılır Liste":
-                fld = c.get('field', '')
-                lookup_tbl = c.get('lookup_table') or (fld if fld in self.db.get_tables() else None)
-                if not lookup_tbl and fld:
-                    for t in self.db.get_tables():
-                        if t in fld.lower() or fld.lower() in t:
-                            lookup_tbl = t
-                            break
-
-                cb_frame = ttk.Frame(self.viewport)
-                cb_frame.place(x=x, y=y, width=w, height=h)
-
-                cb = ttk.Combobox(cb_frame, state="readonly")
-                cb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-                options = [opt.strip() for opt in c.get('options', '').split(',') if opt.strip()]
-
-                if lookup_tbl:
+                cb = ttk.Combobox(self.viewport, state="readonly")
+                if tbl and fld:
                     try:
-                        cols = [ci['name'] for ci in self.db.get_table_columns(lookup_tbl) if ci['name'].lower() != 'id']
-                        if cols:
-                            disp_col = cols[0]
-                            cursor = self.db.execute_query(f"SELECT {self.db.sanitize(disp_col)} FROM {self.db.sanitize(lookup_tbl)}")
-                            options = [str(r[0]) for r in cursor.fetchall()]
+                        rows = self.db.get_table_data(tbl)
+                        vals = [str(r.get(fld, '')) for r in rows if r.get(fld)]
+                        cb['values'] = list(dict.fromkeys(vals))
                     except Exception:
                         pass
+                cb.place(x=x, y=y, width=w, height=h)
+                if fld:
+                    self.form_inputs[fld] = ("combo", cb)
 
-                    btn_add_quick = ttk.Button(cb_frame, text="➕", width=3, command=lambda lt=lookup_tbl, cbw=cb: self.add_quick_lookup_record(lt, cbw))
-                    btn_add_quick.pack(side=tk.RIGHT, padx=1)
-
-                cb['values'] = options
-                if options:
-                    cb.current(0)
-
-                inputs[c['field']] = (cb, c['table'])
+            elif c['type'] == "Onay Kutusu":
+                var = tk.BooleanVar()
+                chk = ttk.Checkbutton(self.viewport, text=c['text'], variable=var)
+                chk.place(x=x, y=y, width=w, height=h)
+                if fld:
+                    self.form_inputs[fld] = ("check", var)
 
             elif c['type'] == "Veri Tablosu":
                 grid_container = ttk.Frame(self.viewport)
                 grid_container.place(x=x, y=y, width=w, height=h)
-
+                
                 tbl_name = c.get('table', '')
-                btn_bar = ttk.Frame(grid_container)
-                btn_bar.pack(side=tk.TOP, fill=tk.X, pady=2)
-
-                def export_csv_act(t=tbl_name):
-                    self.action_engine.execute_chain([{"type": "export_report", "table": t, "format": "csv"}], inputs, comps, page_name)
-
-                def export_html_act(t=tbl_name):
-                    self.action_engine.execute_chain([{"type": "export_report", "table": t, "format": "html"}], inputs, comps, page_name)
-
-                ttk.Button(btn_bar, text="📊 CSV", command=export_csv_act).pack(side=tk.RIGHT, padx=2)
-                ttk.Button(btn_bar, text="📄 HTML", command=export_html_act).pack(side=tk.RIGHT, padx=2)
-                ttk.Button(btn_bar, text="➕ Temizle / Yeni Kayıt", command=lambda: self.clear_form_inputs(inputs)).pack(side=tk.LEFT, padx=2)
-
                 tree = ttk.Treeview(grid_container, show="headings", selectmode="browse")
-                tree.pack(fill=tk.BOTH, expand=True)
-                tree_widgets[tbl_name] = tree
-
-                grid_menu = tk.Menu(self, tearoff=0)
-                grid_menu.add_command(label="✏️ Seçili Kaydı Düzenle", command=lambda t=tree, tn=tbl_name: self.populate_form_from_row(t, inputs, tn))
-                grid_menu.add_command(label="🗑️ Seçili Kaydı Sil", command=lambda t=tree, tn=tbl_name: self.delete_row_act(t, tn))
-
-                def show_grid_menu(event, menu=grid_menu, t=tree):
-                    item = t.identify_row(event.y)
-                    if item:
-                        t.selection_set(item)
-                        menu.tk_popup(event.x_root, event.y_root)
-
-                tree.bind("<Button-3>", show_grid_menu)
-                tree.bind("<Double-1>", lambda ev, t=tree, tn=tbl_name: self.populate_form_from_row(t, inputs, tn))
+                vsb = ttk.Scrollbar(grid_container, orient="vertical", command=tree.yview)
+                tree.configure(yscrollcommand=vsb.set)
+                
+                tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                vsb.pack(side=tk.RIGHT, fill=tk.Y)
 
                 if tbl_name:
-                    self.refresh_grid_data(tree, tbl_name)
+                    try:
+                        cols_info = self.db.get_table_columns(tbl_name)
+                        cols = [col["name"] for col in cols_info]
+                        tree["columns"] = cols
+                        for col in cols:
+                            tree.heading(col, text=col.upper())
+                            tree.column(col, width=90)
+
+                        rows = self.db.get_table_data(tbl_name)
+                        for row in rows:
+                            tree.insert("", tk.END, iid=str(row.get('id', '')), values=[row[col] for col in cols])
+                    except Exception:
+                        pass
+
+                self.main_grid_tree = tree
+
+            elif c['type'] == "Alt Form (Master-Detail)":
+                subform_comps.append((c, x, y, w, h))
 
             elif c['type'] == "Buton":
-                def click(item=c):
-                    act = item.get('action', '')
-                    chain = [{"type": "validate_inputs"}]
-
-                    if act == "Kullanıcı Girişi Yap":
-                        chain.append({"type": "login_user"})
-                        chain.append({"type": "show_message", "text": f"Giriş Başarılı!\nHoş geldiniz."})
-                        chain.append({"type": "navigate", "target": item.get('target', 'Ana_Sayfa')})
-                    elif act == "Kayıt Ekle":
-                        chain.append({"type": "save_or_update_record"})
-                        if item.get('target'):
-                            chain.append({"type": "navigate", "target": item.get('target')})
-                    elif act == "Sayfaya Git":
-                        chain.append({"type": "navigate", "target": item.get('target')})
-
-                    self.action_engine.execute_chain(chain, inputs, comps, page_name)
-
-                btn = ttk.Button(self.viewport, text=c['text'], command=click)
+                act = c.get('action', 'Kaydet / Güncelle (Save/Update)')
+                target = c.get('target', '')
+                btn = ttk.Button(self.viewport, text=c['text'], command=lambda a=act, t=target: self.handle_button_click(a, t))
                 btn.place(x=x, y=y, width=w, height=h)
 
-    def refresh_grid_data(self, tree, tbl_name):
-        for item in tree.get_children():
-            tree.delete(item)
+        # Tablo Kayıt Tıklama Dinleyicisi
+        if self.main_grid_tree and self.active_table_name:
+            def on_tree_select(event):
+                sel = self.main_grid_tree.selection()
+                if sel:
+                    rec_id = sel[0]
+                    for idx, r in enumerate(self.active_records):
+                        if str(r.get('id', '')) == str(rec_id):
+                            self.current_record_index = idx
+                            self.bind_current_record_to_form()
+                            break
 
-        try:
-            cols_info = self.db.get_table_columns(tbl_name)
-            cols = [ci['name'] for ci in cols_info]
-            tree["columns"] = cols
-            for col in cols:
-                tree.heading(col, text=col)
-                tree.column(col, width=90)
+            self.main_grid_tree.bind("<<TreeviewSelect>>", on_tree_select)
 
-            cursor = self.db.execute_query(f"SELECT * FROM {self.db.sanitize(tbl_name)}")
-            for row in cursor.fetchall():
-                tree.insert("", tk.END, values=row)
-        except Exception:
-            pass
+        # Alt Form Bağlantıları
+        for c, x, y, w, h in subform_comps:
+            container = ttk.LabelFrame(self.viewport, text=f" 🔗 Alt Form: [{c.get('table', '')}] ", padding=5)
+            container.place(x=x, y=y, width=w, height=h)
 
-    def delete_row_act(self, tree, tbl_name):
-        sel = tree.selection()
-        if not sel:
-            return
+            sub_tree = ttk.Treeview(container, show="headings")
+            sub_tree.pack(fill=tk.BOTH, expand=True)
 
-        row_vals = tree.item(sel[0])["values"]
-        row_id = row_vals[0]
+            tbl_name = c.get('table', '')
+            detail_fk = c.get('detail_field', '')
 
-        if messagebox.askyesno("Silme Onayı", f"ID = {row_id} olan kayıt silinecektir. Devam edilsin mi?"):
+            if tbl_name:
+                cols_info = self.db.get_table_columns(tbl_name)
+                cols = [col["name"] for col in cols_info]
+                sub_tree["columns"] = cols
+                for col in cols:
+                    sub_tree.heading(col, text=col.upper())
+                    sub_tree.column(col, width=90)
+
+            if self.main_grid_tree and tbl_name and detail_fk:
+                def on_subform_filter(event, st=sub_tree, t_name=tbl_name, fk=detail_fk):
+                    sel = self.main_grid_tree.selection()
+                    if sel:
+                        master_id = sel[0]
+                        for item in st.get_children():
+                            st.delete(item)
+
+                        sql = f"SELECT * FROM {self.db.sanitize(t_name)} WHERE {self.db.sanitize(fk)} = ?"
+                        try:
+                            cursor = self.db.execute_query(sql, (master_id,))
+                            rows = cursor.fetchall()
+                            for row in rows:
+                                st.insert("", tk.END, values=list(row))
+                        except Exception:
+                            pass
+
+                self.main_grid_tree.bind("<<TreeviewSelect>>", on_subform_filter, add="+")
+
+        # Form Verilerini Yükle
+        self.reload_active_records()
+
+    def reload_active_records(self):
+        """Veritabanındaki aktif tablo verilerini yükler ve gezinti çubuğunu günceller."""
+        if self.active_table_name:
             try:
-                self.db.execute_query(f"DELETE FROM {self.db.sanitize(tbl_name)} WHERE id = ?", (row_id,))
-                self.refresh_grid_data(tree, tbl_name)
-                messagebox.showinfo("Başarılı", "Kayıt silindi.")
-            except Exception as e:
-                messagebox.showerror("Hata", str(e))
+                self.active_records = self.db.get_table_data(self.active_table_name)
+                if self.active_records:
+                    if self.current_record_index < 0 or self.current_record_index >= len(self.active_records):
+                        self.current_record_index = 0
+                    self.bind_current_record_to_form()
+                else:
+                    self.current_record_index = -1
+                    self.nav_new()
+            except Exception:
+                self.active_records = []
+                self.current_record_index = -1
+        self.update_nav_bar_label()
+
+    def bind_current_record_to_form(self):
+        """Mevcut kaydı form alanlarına doldurur."""
+        if 0 <= self.current_record_index < len(self.active_records):
+            rec = self.active_records[self.current_record_index]
+            for fld_name, (w_type, widget) in self.form_inputs.items():
+                val = str(rec.get(fld_name, ''))
+                if w_type == "entry":
+                    widget.delete(0, tk.END)
+                    widget.insert(0, val)
+                elif w_type == "combo":
+                    widget.set(val)
+                elif w_type == "check":
+                    widget.set(bool(val and val != '0'))
+
+            if self.main_grid_tree and 'id' in rec:
+                rec_id_str = str(rec['id'])
+                if self.main_grid_tree.exists(rec_id_str):
+                    self.main_grid_tree.selection_set(rec_id_str)
+
+        self.update_nav_bar_label()
+
+    def update_nav_bar_label(self):
+        total = len(self.active_records)
+        curr = self.current_record_index + 1 if total > 0 and self.current_record_index >= 0 else 0
+        self.lbl_record_count.config(text=f"{curr} / {total}")
+
+    # Gezinti Çubuğu Komutları
+    def nav_first(self):
+        if self.active_records:
+            self.current_record_index = 0
+            self.bind_current_record_to_form()
+
+    def nav_prev(self):
+        if self.active_records and self.current_record_index > 0:
+            self.current_record_index -= 1
+            self.bind_current_record_to_form()
+
+    def nav_next(self):
+        if self.active_records and self.current_record_index < len(self.active_records) - 1:
+            self.current_record_index += 1
+            self.bind_current_record_to_form()
+
+    def nav_last(self):
+        if self.active_records:
+            self.current_record_index = len(self.active_records) - 1
+            self.bind_current_record_to_form()
+
+    def nav_new(self):
+        self.current_record_index = -1
+        for fld_name, (w_type, widget) in self.form_inputs.items():
+            if w_type == "entry":
+                widget.delete(0, tk.END)
+            elif w_type == "combo":
+                widget.set("")
+            elif w_type == "check":
+                widget.set(False)
+        self.update_nav_bar_label()
+
+    def handle_button_click(self, action, target_page):
+        """Makro / Eylem Yürütücüsü"""
+        if "Kaydet" in action:
+            if not self.active_table_name:
+                messagebox.showwarning("Uyarı", "Bağlı veritabanı tablosu yok!")
+                return
+
+            data = {}
+            for fld_name, (w_type, widget) in self.form_inputs.items():
+                if w_type in ["entry", "combo"]:
+                    data[fld_name] = widget.get().strip()
+                elif w_type == "check":
+                    data[fld_name] = 1 if widget.get() else 0
+
+            if not data:
+                return
+
+            if 0 <= self.current_record_index < len(self.active_records):  # UPDATE
+                rec_id = self.active_records[self.current_record_index].get('id')
+                set_clause = ", ".join([f"{self.db.sanitize(k)} = ?" for k in data.keys()])
+                sql = f"UPDATE {self.db.sanitize(self.active_table_name)} SET {set_clause} WHERE id = ?"
+                self.db.execute_query(sql, list(data.values()) + [rec_id])
+                messagebox.showinfo("Başarılı", "Kayıt güncellendi!")
+            else:  # INSERT
+                cols = ", ".join([self.db.sanitize(k) for k in data.keys()])
+                placeholders = ", ".join(["?" for _ in data.keys()])
+                sql = f"INSERT INTO {self.db.sanitize(self.active_table_name)} ({cols}) VALUES ({placeholders})"
+                self.db.execute_query(sql, tuple(data.values()))
+                messagebox.showinfo("Başarılı", "Yeni kayıt eklendi!")
+
+            self.reload_active_records()
+
+        elif "Yeni Kayıt" in action:
+            self.nav_new()
+
+        elif "Sil" in action:
+            if 0 <= self.current_record_index < len(self.active_records):
+                rec_id = self.active_records[self.current_record_index].get('id')
+                if messagebox.askyesno("Onay", "Kayıt kalıcı olarak silinsin mi?"):
+                    sql = f"DELETE FROM {self.db.sanitize(self.active_table_name)} WHERE id = ?"
+                    self.db.execute_query(sql, (rec_id,))
+                    messagebox.showinfo("Başarılı", "Kayıt silindi!")
+                    self.reload_active_records()
+
+        elif "Sonraki" in action:
+            self.nav_next()
+
+        elif "Önceki" in action:
+            self.nav_prev()
+
+        elif "Sayfa" in action or "Giriş" in action:
+            if target_page and target_page in self.pages:
+                self.render_page(target_page)
